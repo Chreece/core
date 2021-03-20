@@ -75,7 +75,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
 
     for account in balance_accounts:
         if config[CONF_ACCOUNTS] and account.iban not in account_config:
-            _LOGGER.info("skipping account %s for bank %s", account.iban, fints_name)
+            _LOGGER.info("Skipping account %s for bank %s", account.iban, fints_name)
             continue
 
         account_name = account_config.get(account.iban)
@@ -87,7 +87,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     for account in holdings_accounts:
         if config[CONF_HOLDINGS] and account.accountnumber not in holdings_config:
             _LOGGER.info(
-                "skipping holdings %s for bank %s", account.accountnumber, fints_name
+                "Skipping holdings %s for bank %s", account.accountnumber, fints_name
             )
             continue
 
@@ -169,14 +169,6 @@ class FinTsAccount(Entity):
         self._balance: float = None
         self._currency: str = None
 
-    @property
-    def should_poll(self) -> bool:
-        """Return True.
-
-        Data needs to be polled from the bank servers.
-        """
-        return True
-
     def update(self) -> None:
         """Get the current balance and currency for the account."""
         bank = self._client.client
@@ -201,7 +193,7 @@ class FinTsAccount(Entity):
         return self._currency
 
     @property
-    def device_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict:
         """Additional attributes of the sensor."""
         attributes = {ATTR_ACCOUNT: self._account.iban, ATTR_ACCOUNT_TYPE: "balance"}
         if self._client.name:
@@ -229,14 +221,6 @@ class FinTsHoldingsAccount(Entity):
         self._holdings = []
         self._total: float = None
 
-    @property
-    def should_poll(self) -> bool:
-        """Return True.
-
-        Data needs to be polled from the bank servers.
-        """
-        return True
-
     def update(self) -> None:
         """Get the current holdings for the account."""
         bank = self._client.client
@@ -254,7 +238,7 @@ class FinTsHoldingsAccount(Entity):
         return ICON
 
     @property
-    def device_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict:
         """Additional attributes of the sensor.
 
         Lists each holding of the account with the current value.

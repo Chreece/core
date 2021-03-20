@@ -1,9 +1,10 @@
 """Helper for aiohttp webclient stuff."""
+from __future__ import annotations
+
 import asyncio
-import logging
 from ssl import SSLContext
 import sys
-from typing import Any, Awaitable, Optional, Union, cast
+from typing import Any, Awaitable, cast
 
 import aiohttp
 from aiohttp import web
@@ -17,8 +18,6 @@ from homeassistant.helpers.frame import warn_use
 from homeassistant.helpers.typing import HomeAssistantType
 from homeassistant.loader import bind_hass
 from homeassistant.util import ssl as ssl_util
-
-_LOGGER = logging.getLogger(__name__)
 
 DATA_CONNECTOR = "aiohttp_connector"
 DATA_CONNECTOR_NOTVERIFY = "aiohttp_connector_notverify"
@@ -68,7 +67,9 @@ def async_create_clientsession(
     connector = _async_get_connector(hass, verify_ssl)
 
     clientsession = aiohttp.ClientSession(
-        connector=connector, headers={USER_AGENT: SERVER_SOFTWARE}, **kwargs,
+        connector=connector,
+        headers={USER_AGENT: SERVER_SOFTWARE},
+        **kwargs,
     )
 
     clientsession.close = warn_use(  # type: ignore
@@ -88,7 +89,7 @@ async def async_aiohttp_proxy_web(
     web_coro: Awaitable[aiohttp.ClientResponse],
     buffer_size: int = 102400,
     timeout: int = 10,
-) -> Optional[web.StreamResponse]:
+) -> web.StreamResponse | None:
     """Stream websession request to aiohttp web response."""
     try:
         with async_timeout.timeout(timeout):
@@ -119,17 +120,18 @@ async def async_aiohttp_proxy_stream(
     hass: HomeAssistantType,
     request: web.BaseRequest,
     stream: aiohttp.StreamReader,
-    content_type: str,
+    content_type: str | None,
     buffer_size: int = 102400,
     timeout: int = 10,
 ) -> web.StreamResponse:
     """Stream a stream to aiohttp web response."""
     response = web.StreamResponse()
-    response.content_type = content_type
+    if content_type is not None:
+        response.content_type = content_type
     await response.prepare(request)
 
     try:
-        while True:
+        while hass.is_running:
             with async_timeout.timeout(timeout):
                 data = await stream.read(buffer_size)
 
@@ -175,7 +177,7 @@ def _async_get_connector(
         return cast(aiohttp.BaseConnector, hass.data[key])
 
     if verify_ssl:
-        ssl_context: Union[bool, SSLContext] = ssl_util.client_context()
+        ssl_context: bool | SSLContext = ssl_util.client_context()
     else:
         ssl_context = False
 

@@ -1,6 +1,5 @@
 """Support for Toon sensors."""
-import logging
-from typing import Optional
+from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -24,9 +23,8 @@ from .models import (
     ToonEntity,
     ToonGasMeterDeviceEntity,
     ToonSolarDeviceEntity,
+    ToonWaterMeterDeviceEntity,
 )
-
-_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -64,6 +62,20 @@ async def async_setup_entry(
                 "gas_daily_usage",
                 "gas_meter_reading",
                 "gas_value",
+            )
+        ]
+    )
+
+    sensors.extend(
+        [
+            ToonWaterMeterDeviceSensor(coordinator, key=key)
+            for key in (
+                "water_average_daily",
+                "water_average",
+                "water_daily_cost",
+                "water_daily_usage",
+                "water_meter_reading",
+                "water_value",
             )
         ]
     )
@@ -120,7 +132,7 @@ class ToonSensor(ToonEntity):
         return f"{DOMAIN}_{agreement_id}_sensor_{self.key}"
 
     @property
-    def state(self) -> Optional[str]:
+    def state(self) -> str | None:
         """Return the state of the sensor."""
         section = getattr(
             self.coordinator.data, SENSOR_ENTITIES[self.key][ATTR_SECTION]
@@ -128,12 +140,12 @@ class ToonSensor(ToonEntity):
         return getattr(section, SENSOR_ENTITIES[self.key][ATTR_MEASUREMENT])
 
     @property
-    def unit_of_measurement(self) -> Optional[str]:
+    def unit_of_measurement(self) -> str | None:
         """Return the unit this state is expressed in."""
         return SENSOR_ENTITIES[self.key][ATTR_UNIT_OF_MEASUREMENT]
 
     @property
-    def device_class(self) -> Optional[str]:
+    def device_class(self) -> str | None:
         """Return the device class."""
         return SENSOR_ENTITIES[self.key][ATTR_DEVICE_CLASS]
 
@@ -144,6 +156,10 @@ class ToonElectricityMeterDeviceSensor(ToonSensor, ToonElectricityMeterDeviceEnt
 
 class ToonGasMeterDeviceSensor(ToonSensor, ToonGasMeterDeviceEntity):
     """Defines a Gas Meter sensor."""
+
+
+class ToonWaterMeterDeviceSensor(ToonSensor, ToonWaterMeterDeviceEntity):
+    """Defines a Water Meter sensor."""
 
 
 class ToonSolarDeviceSensor(ToonSensor, ToonSolarDeviceEntity):

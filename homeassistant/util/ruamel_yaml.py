@@ -1,9 +1,11 @@
 """ruamel.yaml utility functions."""
+from __future__ import annotations
+
 from collections import OrderedDict
 import logging
 import os
 from os import O_CREAT, O_TRUNC, O_WRONLY, stat_result
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Union
 
 import ruamel.yaml
 from ruamel.yaml import YAML  # type: ignore
@@ -22,7 +24,7 @@ JSON_TYPE = Union[List, Dict, str]  # pylint: disable=invalid-name
 class ExtSafeConstructor(SafeConstructor):
     """Extended SafeConstructor."""
 
-    name: Optional[str] = None
+    name: str | None = None
 
 
 class UnsupportedYamlError(HomeAssistantError):
@@ -70,18 +72,18 @@ def object_to_yaml(data: JSON_TYPE) -> str:
         return result
     except YAMLError as exc:
         _LOGGER.error("YAML error: %s", exc)
-        raise HomeAssistantError(exc)
+        raise HomeAssistantError(exc) from exc
 
 
 def yaml_to_object(data: str) -> JSON_TYPE:
     """Create object from yaml string."""
     yaml = YAML(typ="rt")
     try:
-        result: Union[List, Dict, str] = yaml.load(data)
+        result: list | dict | str = yaml.load(data)
         return result
     except YAMLError as exc:
         _LOGGER.error("YAML error: %s", exc)
-        raise HomeAssistantError(exc)
+        raise HomeAssistantError(exc) from exc
 
 
 def load_yaml(fname: str, round_trip: bool = False) -> JSON_TYPE:
@@ -102,10 +104,10 @@ def load_yaml(fname: str, round_trip: bool = False) -> JSON_TYPE:
             return yaml.load(conf_file) or OrderedDict()
     except YAMLError as exc:
         _LOGGER.error("YAML error in %s: %s", fname, exc)
-        raise HomeAssistantError(exc)
+        raise HomeAssistantError(exc) from exc
     except UnicodeDecodeError as exc:
         _LOGGER.error("Unable to read file %s: %s", fname, exc)
-        raise HomeAssistantError(exc)
+        raise HomeAssistantError(exc) from exc
 
 
 def save_yaml(fname: str, data: JSON_TYPE) -> None:
@@ -132,10 +134,10 @@ def save_yaml(fname: str, data: JSON_TYPE) -> None:
                 pass
     except YAMLError as exc:
         _LOGGER.error(str(exc))
-        raise HomeAssistantError(exc)
+        raise HomeAssistantError(exc) from exc
     except OSError as exc:
         _LOGGER.exception("Saving YAML file %s failed: %s", fname, exc)
-        raise WriteError(exc)
+        raise WriteError(exc) from exc
     finally:
         if os.path.exists(tmp_fname):
             try:

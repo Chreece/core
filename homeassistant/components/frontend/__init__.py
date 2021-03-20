@@ -1,10 +1,12 @@
 """Handle the frontend for Home Assistant."""
+from __future__ import annotations
+
 import json
 import logging
 import mimetypes
 import os
 import pathlib
-from typing import Any, Dict, Optional, Set, Tuple
+from typing import Any
 
 from aiohttp import hdrs, web, web_urldispatcher
 import jinja2
@@ -14,7 +16,7 @@ from yarl import URL
 from homeassistant.components import websocket_api
 from homeassistant.components.http.view import HomeAssistantView
 from homeassistant.config import async_hass_config_yaml
-from homeassistant.const import CONF_NAME, EVENT_THEMES_UPDATED
+from homeassistant.const import CONF_MODE, CONF_NAME, EVENT_THEMES_UPDATED
 from homeassistant.core import callback
 from homeassistant.helpers import service
 import homeassistant.helpers.config_validation as cv
@@ -26,7 +28,7 @@ from .storage import async_setup_frontend_storage
 # mypy: allow-untyped-defs, no-check-untyped-defs
 
 # Fix mimetypes for borked Windows machines
-# https://github.com/home-assistant/home-assistant-polymer/issues/3336
+# https://github.com/home-assistant/frontend/issues/3336
 mimetypes.add_type("text/css", ".css")
 mimetypes.add_type("application/javascript", ".js")
 
@@ -70,13 +72,18 @@ MANIFEST_JSON = {
 
 DATA_PANELS = "frontend_panels"
 DATA_JS_VERSION = "frontend_js_version"
-DATA_EXTRA_HTML_URL = "frontend_extra_html_url"
-DATA_EXTRA_HTML_URL_ES5 = "frontend_extra_html_url_es5"
 DATA_EXTRA_MODULE_URL = "frontend_extra_module_url"
 DATA_EXTRA_JS_URL_ES5 = "frontend_extra_js_url_es5"
+
+THEMES_STORAGE_KEY = f"{DOMAIN}_theme"
+THEMES_STORAGE_VERSION = 1
+THEMES_SAVE_DELAY = 60
+DATA_THEMES_STORE = "frontend_themes_store"
 DATA_THEMES = "frontend_themes"
 DATA_DEFAULT_THEME = "frontend_default_theme"
+DATA_DEFAULT_DARK_THEME = "frontend_default_dark_theme"
 DEFAULT_THEME = "default"
+VALUE_NO_THEME = "none"
 
 PRIMARY_COLOR = "primary-color"
 
@@ -84,29 +91,23 @@ _LOGGER = logging.getLogger(__name__)
 
 CONFIG_SCHEMA = vol.Schema(
     {
-        DOMAIN: vol.All(
-            cv.deprecated(CONF_EXTRA_HTML_URL, invalidation_version="0.115"),
-            cv.deprecated(CONF_EXTRA_HTML_URL_ES5, invalidation_version="0.115"),
-            vol.Schema(
-                {
-                    vol.Optional(CONF_FRONTEND_REPO): cv.isdir,
-                    vol.Optional(CONF_THEMES): vol.Schema(
-                        {cv.string: {cv.string: cv.string}}
-                    ),
-                    vol.Optional(CONF_EXTRA_HTML_URL): vol.All(
-                        cv.ensure_list, [cv.string]
-                    ),
-                    vol.Optional(CONF_EXTRA_MODULE_URL): vol.All(
-                        cv.ensure_list, [cv.string]
-                    ),
-                    vol.Optional(CONF_EXTRA_JS_URL_ES5): vol.All(
-                        cv.ensure_list, [cv.string]
-                    ),
-                    # We no longer use these options.
-                    vol.Optional(CONF_EXTRA_HTML_URL_ES5): cv.match_all,
-                    vol.Optional(CONF_JS_VERSION): cv.match_all,
-                },
-            ),
+        DOMAIN: vol.Schema(
+            {
+                vol.Optional(CONF_FRONTEND_REPO): cv.isdir,
+                vol.Optional(CONF_THEMES): vol.Schema(
+                    {cv.string: {cv.string: cv.string}}
+                ),
+                vol.Optional(CONF_EXTRA_MODULE_URL): vol.All(
+                    cv.ensure_list, [cv.string]
+                ),
+                vol.Optional(CONF_EXTRA_JS_URL_ES5): vol.All(
+                    cv.ensure_list, [cv.string]
+                ),
+                # We no longer use these options.
+                vol.Optional(CONF_EXTRA_HTML_URL): cv.match_all,
+                vol.Optional(CONF_EXTRA_HTML_URL_ES5): cv.match_all,
+                vol.Optional(CONF_JS_VERSION): cv.match_all,
+            },
         )
     },
     extra=vol.ALLOW_EXTRA,
@@ -120,19 +121,19 @@ class Panel:
     """Abstract class for panels."""
 
     # Name of the webcomponent
-    component_name: Optional[str] = None
+    component_name: str | None = None
 
     # Icon to show in the sidebar
-    sidebar_icon: Optional[str] = None
+    sidebar_icon: str | None = None
 
     # Title to show in the sidebar
-    sidebar_title: Optional[str] = None
+    sidebar_title: str | None = None
 
     # Url to show the panel in the frontend
-    frontend_url_path: Optional[str] = None
+    frontend_url_path: str | None = None
 
     # Config to pass to the webcomponent
-    config: Optional[Dict[str, Any]] = None
+    config: dict[str, Any] | None = None
 
     # If the panel should only be visible to admins
     require_admin = False
@@ -212,17 +213,6 @@ def async_remove_panel(hass, frontend_url_path):
     hass.bus.async_fire(EVENT_PANELS_UPDATED)
 
 
-@bind_hass
-@callback
-def add_extra_html_url(hass, url, es5=False):
-    """Register extra html url to load."""
-    key = DATA_EXTRA_HTML_URL_ES5 if es5 else DATA_EXTRA_HTML_URL
-    url_set = hass.data.get(key)
-    if url_set is None:
-        url_set = hass.data[key] = set()
-    url_set.add(url)
-
-
 def add_extra_js_url(hass, url, es5=False):
     """Register extra js or module url to load."""
     key = DATA_EXTRA_JS_URL_ES5 if es5 else DATA_EXTRA_MODULE_URL
@@ -259,6 +249,13 @@ async def async_setup(hass, config):
 
     conf = config.get(DOMAIN, {})
 
+    for key in (CONF_EXTRA_HTML_URL, CONF_EXTRA_HTML_URL_ES5, CONF_JS_VERSION):
+        if key in conf:
+            _LOGGER.error(
+                "Please remove %s from your frontend config. It is no longer supported",
+                key,
+            )
+
     repo_path = conf.get(CONF_FRONTEND_REPO)
     is_dev = repo_path is not None
     root_path = _frontend_root(repo_path)
@@ -266,15 +263,19 @@ async def async_setup(hass, config):
     for path, should_cache in (
         ("service_worker.js", False),
         ("robots.txt", False),
-        ("onboarding.html", True),
-        ("static", True),
-        ("frontend_latest", True),
-        ("frontend_es5", True),
+        ("onboarding.html", not is_dev),
+        ("static", not is_dev),
+        ("frontend_latest", not is_dev),
+        ("frontend_es5", not is_dev),
     ):
         hass.http.register_static_path(f"/{path}", str(root_path / path), should_cache)
 
     hass.http.register_static_path(
         "/auth/authorize", str(root_path / "authorize.html"), False
+    )
+    # https://wicg.github.io/change-password-url/
+    hass.http.register_redirect(
+        "/.well-known/change-password", "/profile", redirect_exc=web.HTTPFound
     )
 
     local = hass.config.path("www")
@@ -303,12 +304,6 @@ async def async_setup(hass, config):
         sidebar_icon="hass:hammer",
     )
 
-    if DATA_EXTRA_HTML_URL not in hass.data:
-        hass.data[DATA_EXTRA_HTML_URL] = set()
-
-    for url in conf.get(CONF_EXTRA_HTML_URL, []):
-        add_extra_html_url(hass, url, False)
-
     if DATA_EXTRA_MODULE_URL not in hass.data:
         hass.data[DATA_EXTRA_MODULE_URL] = set()
 
@@ -321,16 +316,30 @@ async def async_setup(hass, config):
     for url in conf.get(CONF_EXTRA_JS_URL_ES5, []):
         add_extra_js_url(hass, url, True)
 
-    _async_setup_themes(hass, conf.get(CONF_THEMES))
+    await _async_setup_themes(hass, conf.get(CONF_THEMES))
 
     return True
 
 
-@callback
-def _async_setup_themes(hass, themes):
+async def _async_setup_themes(hass, themes):
     """Set up themes data and services."""
-    hass.data[DATA_DEFAULT_THEME] = DEFAULT_THEME
     hass.data[DATA_THEMES] = themes or {}
+
+    store = hass.data[DATA_THEMES_STORE] = hass.helpers.storage.Store(
+        THEMES_STORAGE_VERSION, THEMES_STORAGE_KEY
+    )
+
+    theme_data = await store.async_load() or {}
+    theme_name = theme_data.get(DATA_DEFAULT_THEME, DEFAULT_THEME)
+    dark_theme_name = theme_data.get(DATA_DEFAULT_DARK_THEME)
+
+    if theme_name == DEFAULT_THEME or theme_name in hass.data[DATA_THEMES]:
+        hass.data[DATA_DEFAULT_THEME] = theme_name
+    else:
+        hass.data[DATA_DEFAULT_THEME] = DEFAULT_THEME
+
+    if dark_theme_name == DEFAULT_THEME or dark_theme_name in hass.data[DATA_THEMES]:
+        hass.data[DATA_DEFAULT_DARK_THEME] = dark_theme_name
 
     @callback
     def update_theme_and_fire_event():
@@ -348,14 +357,35 @@ def _async_setup_themes(hass, themes):
     @callback
     def set_theme(call):
         """Set backend-preferred theme."""
-        data = call.data
-        name = data[CONF_NAME]
-        if name == DEFAULT_THEME or name in hass.data[DATA_THEMES]:
-            _LOGGER.info("Theme %s set as default", name)
-            hass.data[DATA_DEFAULT_THEME] = name
-            update_theme_and_fire_event()
+        name = call.data[CONF_NAME]
+        mode = call.data.get("mode", "light")
+
+        if (
+            name not in (DEFAULT_THEME, VALUE_NO_THEME)
+            and name not in hass.data[DATA_THEMES]
+        ):
+            _LOGGER.warning("Theme %s not found", name)
+            return
+
+        light_mode = mode == "light"
+
+        theme_key = DATA_DEFAULT_THEME if light_mode else DATA_DEFAULT_DARK_THEME
+
+        if name == VALUE_NO_THEME:
+            to_set = DEFAULT_THEME if light_mode else None
         else:
-            _LOGGER.warning("Theme %s is not defined", name)
+            _LOGGER.info("Theme %s set as default %s theme", name, mode)
+            to_set = name
+
+        hass.data[theme_key] = to_set
+        store.async_delay_save(
+            lambda: {
+                DATA_DEFAULT_THEME: hass.data[DATA_DEFAULT_THEME],
+                DATA_DEFAULT_DARK_THEME: hass.data.get(DATA_DEFAULT_DARK_THEME),
+            },
+            THEMES_SAVE_DELAY,
+        )
+        update_theme_and_fire_event()
 
     async def reload_themes(_):
         """Reload themes."""
@@ -364,6 +394,11 @@ def _async_setup_themes(hass, themes):
         hass.data[DATA_THEMES] = new_themes
         if hass.data[DATA_DEFAULT_THEME] not in new_themes:
             hass.data[DATA_DEFAULT_THEME] = DEFAULT_THEME
+        if (
+            hass.data.get(DATA_DEFAULT_DARK_THEME)
+            and hass.data.get(DATA_DEFAULT_DARK_THEME) not in new_themes
+        ):
+            hass.data[DATA_DEFAULT_DARK_THEME] = None
         update_theme_and_fire_event()
 
     service.async_register_admin_service(
@@ -371,7 +406,12 @@ def _async_setup_themes(hass, themes):
         DOMAIN,
         SERVICE_SET_THEME,
         set_theme,
-        vol.Schema({vol.Required(CONF_NAME): cv.string}),
+        vol.Schema(
+            {
+                vol.Required(CONF_NAME): cv.string,
+                vol.Optional(CONF_MODE): vol.Any("dark", "light"),
+            }
+        ),
     )
 
     service.async_register_admin_service(
@@ -405,7 +445,7 @@ class IndexView(web_urldispatcher.AbstractResource):
 
     async def resolve(
         self, request: web.Request
-    ) -> Tuple[Optional[web_urldispatcher.UrlMappingMatchInfo], Set[str]]:
+    ) -> tuple[web_urldispatcher.UrlMappingMatchInfo | None, set[str]]:
         """Resolve resource.
 
         Return (UrlMappingMatchInfo, allowed_methods) pair.
@@ -465,7 +505,6 @@ class IndexView(web_urldispatcher.AbstractResource):
         return web.Response(
             text=template.render(
                 theme_color=MANIFEST_JSON["theme_color"],
-                extra_urls=hass.data[DATA_EXTRA_HTML_URL],
                 extra_modules=hass.data[DATA_EXTRA_MODULE_URL],
                 extra_js_es5=hass.data[DATA_EXTRA_JS_URL_ES5],
             ),
@@ -521,7 +560,7 @@ def websocket_get_themes(hass, connection, msg):
                     "themes": {
                         "safe_mode": {
                             "primary-color": "#db4437",
-                            "accent-color": "#eeee02",
+                            "accent-color": "#ffca28",
                         }
                     },
                     "default_theme": "safe_mode",
@@ -536,6 +575,7 @@ def websocket_get_themes(hass, connection, msg):
             {
                 "themes": hass.data[DATA_THEMES],
                 "default_theme": hass.data[DATA_DEFAULT_THEME],
+                "default_dark_theme": hass.data.get(DATA_DEFAULT_DARK_THEME),
             },
         )
     )

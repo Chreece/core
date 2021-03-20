@@ -1,10 +1,11 @@
 """Provides device automations for Lock."""
-from typing import List
+from __future__ import annotations
 
 import voluptuous as vol
 
-from homeassistant.components.automation import AutomationActionType, state
+from homeassistant.components.automation import AutomationActionType
 from homeassistant.components.device_automation import TRIGGER_BASE_SCHEMA
+from homeassistant.components.homeassistant.triggers import state as state_trigger
 from homeassistant.const import (
     CONF_DEVICE_ID,
     CONF_DOMAIN,
@@ -30,7 +31,7 @@ TRIGGER_SCHEMA = TRIGGER_BASE_SCHEMA.extend(
 )
 
 
-async def async_get_triggers(hass: HomeAssistant, device_id: str) -> List[dict]:
+async def async_get_triggers(hass: HomeAssistant, device_id: str) -> list[dict]:
     """List device triggers for Lock devices."""
     registry = await entity_registry.async_get_registry(hass)
     triggers = []
@@ -73,19 +74,16 @@ async def async_attach_trigger(
     config = TRIGGER_SCHEMA(config)
 
     if config[CONF_TYPE] == "locked":
-        from_state = STATE_UNLOCKED
         to_state = STATE_LOCKED
     else:
-        from_state = STATE_LOCKED
         to_state = STATE_UNLOCKED
 
     state_config = {
-        state.CONF_PLATFORM: "state",
+        CONF_PLATFORM: "state",
         CONF_ENTITY_ID: config[CONF_ENTITY_ID],
-        state.CONF_FROM: from_state,
-        state.CONF_TO: to_state,
+        state_trigger.CONF_TO: to_state,
     }
-    state_config = state.TRIGGER_SCHEMA(state_config)
-    return await state.async_attach_trigger(
+    state_config = state_trigger.TRIGGER_SCHEMA(state_config)
+    return await state_trigger.async_attach_trigger(
         hass, state_config, action, automation_info, platform_type="device"
     )

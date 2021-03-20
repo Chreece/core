@@ -1,13 +1,14 @@
 """Sensor platform to display the current fuel prices at a NSW fuel station."""
+from __future__ import annotations
+
 import datetime
 import logging
-from typing import Optional
 
 from nsw_fuel import FuelCheckClient, FuelCheckError
 import voluptuous as vol
 
 from homeassistant.components.sensor import PLATFORM_SCHEMA
-from homeassistant.const import ATTR_ATTRIBUTION
+from homeassistant.const import ATTR_ATTRIBUTION, CURRENCY_CENT, VOLUME_LITERS
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import Entity
 from homeassistant.util import Throttle
@@ -159,7 +160,7 @@ class StationPriceSensor(Entity):
         return f"{self._station_data.get_station_name()} {self._fuel_type}"
 
     @property
-    def state(self) -> Optional[float]:
+    def state(self) -> float | None:
         """Return the state of the sensor."""
         price_info = self._station_data.for_fuel_type(self._fuel_type)
         if price_info:
@@ -168,7 +169,7 @@ class StationPriceSensor(Entity):
         return None
 
     @property
-    def device_state_attributes(self) -> dict:
+    def extra_state_attributes(self) -> dict:
         """Return the state attributes of the device."""
         return {
             ATTR_STATION_ID: self._station_data.station_id,
@@ -179,7 +180,7 @@ class StationPriceSensor(Entity):
     @property
     def unit_of_measurement(self) -> str:
         """Return the units of measurement."""
-        return "¢/L"
+        return f"{CURRENCY_CENT}/{VOLUME_LITERS}"
 
     def update(self):
         """Update current conditions."""

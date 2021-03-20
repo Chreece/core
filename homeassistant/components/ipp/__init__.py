@@ -1,8 +1,10 @@
 """The Internet Printing Protocol (IPP) integration."""
+from __future__ import annotations
+
 import asyncio
 from datetime import timedelta
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from pyipp import IPP, IPPError, Printer as IPPPrinter
 
@@ -18,8 +20,11 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.entity import Entity
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+    UpdateFailed,
+)
 
 from .const import (
     ATTR_IDENTIFIERS,
@@ -36,7 +41,7 @@ SCAN_INTERVAL = timedelta(seconds=60)
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup(hass: HomeAssistant, config: Dict) -> bool:
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the IPP component."""
     hass.data.setdefault(DOMAIN, {})
     return True
@@ -45,25 +50,27 @@ async def async_setup(hass: HomeAssistant, config: Dict) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up IPP from a config entry."""
 
-    # Create IPP instance for this entry
-    coordinator = IPPDataUpdateCoordinator(
-        hass,
-        host=entry.data[CONF_HOST],
-        port=entry.data[CONF_PORT],
-        base_path=entry.data[CONF_BASE_PATH],
-        tls=entry.data[CONF_SSL],
-        verify_ssl=entry.data[CONF_VERIFY_SSL],
-    )
+    coordinator = hass.data[DOMAIN].get(entry.entry_id)
+    if not coordinator:
+        # Create IPP instance for this entry
+        coordinator = IPPDataUpdateCoordinator(
+            hass,
+            host=entry.data[CONF_HOST],
+            port=entry.data[CONF_PORT],
+            base_path=entry.data[CONF_BASE_PATH],
+            tls=entry.data[CONF_SSL],
+            verify_ssl=entry.data[CONF_VERIFY_SSL],
+        )
+        hass.data[DOMAIN][entry.entry_id] = coordinator
+
     await coordinator.async_refresh()
 
     if not coordinator.last_update_success:
         raise ConfigEntryNotReady
 
-    hass.data[DOMAIN][entry.entry_id] = coordinator
-
-    for component in PLATFORMS:
+    for platform in PLATFORMS:
         hass.async_create_task(
-            hass.config_entries.async_forward_entry_setup(entry, component)
+            hass.config_entries.async_forward_entry_setup(entry, platform)
         )
 
     return True
@@ -74,8 +81,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = all(
         await asyncio.gather(
             *[
-                hass.config_entries.async_forward_entry_unload(entry, component)
-                for component in PLATFORMS
+                hass.config_entries.async_forward_entry_unload(entry, platform)
+                for platform in PLATFORMS
             ]
         )
     )
@@ -86,7 +93,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
-class IPPDataUpdateCoordinator(DataUpdateCoordinator):
+class IPPDataUpdateCoordinator(DataUpdateCoordinator[IPPPrinter]):
     """Class to manage fetching IPP data from single endpoint."""
 
     def __init__(
@@ -110,7 +117,10 @@ class IPPDataUpdateCoordinator(DataUpdateCoordinator):
         )
 
         super().__init__(
-            hass, _LOGGER, name=DOMAIN, update_interval=SCAN_INTERVAL,
+            hass,
+            _LOGGER,
+            name=DOMAIN,
+            update_interval=SCAN_INTERVAL,
         )
 
     async def _async_update_data(self) -> IPPPrinter:
@@ -118,10 +128,10 @@ class IPPDataUpdateCoordinator(DataUpdateCoordinator):
         try:
             return await self.ipp.printer()
         except IPPError as error:
-            raise UpdateFailed(f"Invalid response from API: {error}")
+            raise UpdateFailed(f"Invalid response from API: {error}") from error
 
 
-class IPPEntity(Entity):
+class IPPEntity(CoordinatorEntity):
     """Defines a base IPP entity."""
 
     def __init__(
@@ -135,12 +145,12 @@ class IPPEntity(Entity):
         enabled_default: bool = True,
     ) -> None:
         """Initialize the IPP entity."""
+        super().__init__(coordinator)
         self._device_id = device_id
         self._enabled_default = enabled_default
         self._entry_id = entry_id
         self._icon = icon
         self._name = name
-        self.coordinator = coordinator
 
     @property
     def name(self) -> str:
@@ -153,32 +163,12 @@ class IPPEntity(Entity):
         return self._icon
 
     @property
-    def available(self) -> bool:
-        """Return True if entity is available."""
-        return self.coordinator.last_update_success
-
-    @property
     def entity_registry_enabled_default(self) -> bool:
         """Return if the entity should be enabled when first added to the entity registry."""
         return self._enabled_default
 
     @property
-    def should_poll(self) -> bool:
-        """Return the polling requirement of the entity."""
-        return False
-
-    async def async_added_to_hass(self) -> None:
-        """Connect to dispatcher listening for entity data notifications."""
-        self.async_on_remove(
-            self.coordinator.async_add_listener(self.async_write_ha_state)
-        )
-
-    async def async_update(self) -> None:
-        """Update an IPP entity."""
-        await self.coordinator.async_request_refresh()
-
-    @property
-    def device_info(self) -> Dict[str, Any]:
+    def device_info(self) -> dict[str, Any]:
         """Return device information about this IPP device."""
         if self._device_id is None:
             return None

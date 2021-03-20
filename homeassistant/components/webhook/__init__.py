@@ -6,7 +6,6 @@ from aiohttp.web import Request, Response
 import voluptuous as vol
 
 from homeassistant.components import websocket_api
-from homeassistant.components.http.const import KEY_REAL_IP
 from homeassistant.components.http.view import HomeAssistantView
 from homeassistant.const import HTTP_OK
 from homeassistant.core import callback
@@ -80,7 +79,7 @@ async def async_handle_webhook(hass, webhook_id, request):
         if isinstance(request, MockRequest):
             received_from = request.mock_source
         else:
-            received_from = request[KEY_REAL_IP]
+            received_from = request.remote
 
         _LOGGER.warning(
             "Received message for unregistered webhook %s from %s",
@@ -90,7 +89,7 @@ async def async_handle_webhook(hass, webhook_id, request):
         # Look at content to provide some context for received webhook
         # Limit to 64 chars to avoid flooding the log
         content = await request.content.read(64)
-        _LOGGER.debug("%s...", content)
+        _LOGGER.debug("%s", content)
         return Response(status=HTTP_OK)
 
     try:

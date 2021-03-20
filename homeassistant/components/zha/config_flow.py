@@ -1,6 +1,8 @@
 """Config flow for ZHA."""
+from __future__ import annotations
+
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 import serial.tools.list_ports
 import voluptuous as vol
@@ -45,6 +47,10 @@ class ZhaFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             + (f" - {p.manufacturer}" if p.manufacturer else "")
             for p in ports
         ]
+
+        if not list_of_ports:
+            return await self.async_step_pick_radio()
+
         list_of_ports.append(CONF_MANUAL_PATH)
 
         if user_input is not None:
@@ -60,7 +66,10 @@ class ZhaFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             if auto_detected_data is not None:
                 title = f"{port.description}, s/n: {port.serial_number or 'n/a'}"
                 title += f" - {port.manufacturer}" if port.manufacturer else ""
-                return self.async_create_entry(title=title, data=auto_detected_data,)
+                return self.async_create_entry(
+                    title=title,
+                    data=auto_detected_data,
+                )
 
             # did not detect anything
             self._device_path = dev_path
@@ -78,7 +87,8 @@ class ZhaFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = {vol.Required(CONF_RADIO_TYPE): vol.In(sorted(RadioType.list()))}
         return self.async_show_form(
-            step_id="pick_radio", data_schema=vol.Schema(schema),
+            step_id="pick_radio",
+            data_schema=vol.Schema(schema),
         )
 
     async def async_step_port_config(self, user_input=None):
@@ -113,11 +123,13 @@ class ZhaFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 schema[param] = value
 
         return self.async_show_form(
-            step_id="port_config", data_schema=vol.Schema(schema), errors=errors,
+            step_id="port_config",
+            data_schema=vol.Schema(schema),
+            errors=errors,
         )
 
 
-async def detect_radios(dev_path: str) -> Optional[Dict[str, Any]]:
+async def detect_radios(dev_path: str) -> dict[str, Any] | None:
     """Probe all radio types on the device port."""
     for radio in RadioType:
         dev_config = radio.controller.SCHEMA_DEVICE({CONF_DEVICE_PATH: dev_path})

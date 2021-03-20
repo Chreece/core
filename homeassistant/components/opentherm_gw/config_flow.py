@@ -19,7 +19,7 @@ from homeassistant.core import callback
 import homeassistant.helpers.config_validation as cv
 
 from . import DOMAIN
-from .const import CONF_FLOOR_TEMP, CONF_PRECISION
+from .const import CONF_FLOOR_TEMP, CONF_READ_PRECISION, CONF_SET_PRECISION
 
 
 class OpenThermGwConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -54,14 +54,12 @@ class OpenThermGwConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 otgw = pyotgw.pyotgw()
                 status = await otgw.connect(self.hass.loop, device)
                 await otgw.disconnect()
-                return status.get(gw_vars.OTGW_ABOUT)
+                return status[gw_vars.OTGW].get(gw_vars.OTGW_ABOUT)
 
             try:
                 res = await asyncio.wait_for(test_connection(), timeout=10)
-            except asyncio.TimeoutError:
-                return self._show_form({"base": "timeout"})
-            except SerialException:
-                return self._show_form({"base": "serial_error"})
+            except (asyncio.TimeoutError, SerialException):
+                return self._show_form({"base": "cannot_connect"})
 
             if res:
                 return self._create_entry(gw_id, name, device)
@@ -116,8 +114,6 @@ class OpenThermGwOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input=None):
         """Manage the opentherm_gw options."""
         if user_input is not None:
-            if user_input.get(CONF_PRECISION) == 0:
-                user_input[CONF_PRECISION] = None
             return self.async_create_entry(title="", data=user_input)
 
         return self.async_show_form(
@@ -125,8 +121,17 @@ class OpenThermGwOptionsFlow(config_entries.OptionsFlow):
             data_schema=vol.Schema(
                 {
                     vol.Optional(
-                        CONF_PRECISION,
-                        default=self.config_entry.options.get(CONF_PRECISION, 0),
+                        CONF_READ_PRECISION,
+                        default=self.config_entry.options.get(CONF_READ_PRECISION, 0),
+                    ): vol.All(
+                        vol.Coerce(float),
+                        vol.In(
+                            [0, PRECISION_TENTHS, PRECISION_HALVES, PRECISION_WHOLE]
+                        ),
+                    ),
+                    vol.Optional(
+                        CONF_SET_PRECISION,
+                        default=self.config_entry.options.get(CONF_SET_PRECISION, 0),
                     ): vol.All(
                         vol.Coerce(float),
                         vol.In(

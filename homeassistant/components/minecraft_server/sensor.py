@@ -1,7 +1,7 @@
 """The Minecraft Server sensor platform."""
+from __future__ import annotations
 
-import logging
-from typing import Any, Dict
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import TIME_MILLISECONDS
@@ -26,8 +26,6 @@ from .const import (
     UNIT_PROTOCOL_VERSION,
     UNIT_VERSION,
 )
-
-_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -145,19 +143,19 @@ class MinecraftServerPlayersOnlineSensor(MinecraftServerSensorEntity):
         """Update online players state and device state attributes."""
         self._state = self._server.players_online
 
-        device_state_attributes = None
+        extra_state_attributes = None
         players_list = self._server.players_list
 
         if players_list is not None:
             if len(players_list) != 0:
-                device_state_attributes = {ATTR_PLAYERS_LIST: self._server.players_list}
+                extra_state_attributes = {ATTR_PLAYERS_LIST: self._server.players_list}
 
-        self._device_state_attributes = device_state_attributes
+        self._extra_state_attributes = extra_state_attributes
 
     @property
-    def device_state_attributes(self) -> Dict[str, Any]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return players list in device state attributes."""
-        return self._device_state_attributes
+        return self._extra_state_attributes
 
 
 class MinecraftServerPlayersMaxSensor(MinecraftServerSensorEntity):

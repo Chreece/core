@@ -4,14 +4,15 @@
             "already_configured": "Ger\u00e4t ist bereits konfiguriert"
         },
         "error": {
-            "cannot_connect": "Verbindung nicht m\u00f6glich",
-            "unknown": "Unerwarteter Fehler"
+            "invalid_auth": "Ung\u00fcltige Authentifizierung"
         },
         "step": {
             "user": {
                 "data": {
+                    "email": "E-Mail",
                     "password": "Passwort"
-                }
+                },
+                "description": "M\u00f6chten Sie mit der Einrichtung beginnen?"
             }
         }
     }

@@ -88,6 +88,7 @@ light:
   brightness_scale: 99
 """
 import json
+from unittest.mock import call, patch
 
 import pytest
 
@@ -110,6 +111,7 @@ from .test_common import (
     help_test_discovery_removal,
     help_test_discovery_update,
     help_test_discovery_update_attr,
+    help_test_discovery_update_unchanged,
     help_test_entity_debug_info_message,
     help_test_entity_device_info_remove,
     help_test_entity_device_info_update,
@@ -124,7 +126,6 @@ from .test_common import (
     help_test_update_with_json_attrs_not_dict,
 )
 
-from tests.async_mock import call, patch
 from tests.common import async_fire_mqtt_message
 from tests.components.light import common
 
@@ -294,10 +295,20 @@ async def test_controlling_state_via_topic(hass, mqtt_mock):
     light_state = hass.states.get("light.test")
     assert light_state.attributes.get("hs_color") == (180.0, 50.0)
 
+    async_fire_mqtt_message(hass, "test_light_rgb", '{"state":"ON", "color":null}')
+
+    light_state = hass.states.get("light.test")
+    assert "hs_color" not in light_state.attributes
+
     async_fire_mqtt_message(hass, "test_light_rgb", '{"state":"ON", "color_temp":155}')
 
     light_state = hass.states.get("light.test")
     assert light_state.attributes.get("color_temp") == 155
+
+    async_fire_mqtt_message(hass, "test_light_rgb", '{"state":"ON", "color_temp":null}')
+
+    light_state = hass.states.get("light.test")
+    assert "color_temp" not in light_state.attributes
 
     async_fire_mqtt_message(
         hass, "test_light_rgb", '{"state":"ON", "effect":"colorloop"}'
@@ -795,7 +806,7 @@ async def test_effect(hass, mqtt_mock):
     mqtt_mock.async_publish.reset_mock()
     state = hass.states.get("light.test")
     assert state.state == STATE_ON
-    assert state.attributes.get("effect") == "none"
+    assert state.attributes.get("effect") is None
 
     await common.async_turn_on(hass, "light.test", effect="rainbow")
 
@@ -864,6 +875,24 @@ async def test_flash_short_and_long(hass, mqtt_mock):
     mqtt_mock.async_publish.reset_mock()
     state = hass.states.get("light.test")
     assert state.state == STATE_ON
+
+    await common.async_turn_off(hass, "light.test", flash="short")
+
+    mqtt_mock.async_publish.assert_called_once_with(
+        "test_light_rgb/set", JsonValidator('{"state": "OFF", "flash": 5}'), 0, False
+    )
+    mqtt_mock.async_publish.reset_mock()
+    state = hass.states.get("light.test")
+    assert state.state == STATE_OFF
+
+    await common.async_turn_off(hass, "light.test", flash="long")
+
+    mqtt_mock.async_publish.assert_called_once_with(
+        "test_light_rgb/set", JsonValidator('{"state": "OFF", "flash": 15}'), 0, False
+    )
+    mqtt_mock.async_publish.reset_mock()
+    state = hass.states.get("light.test")
+    assert state.state == STATE_OFF
 
 
 async def test_transition(hass, mqtt_mock):
@@ -941,7 +970,7 @@ async def test_brightness_scale(hass, mqtt_mock):
 
     state = hass.states.get("light.test")
     assert state.state == STATE_ON
-    assert state.attributes.get("brightness") == 255
+    assert state.attributes.get("brightness") is None
 
     # Turn on the light with brightness
     async_fire_mqtt_message(
@@ -1003,9 +1032,23 @@ async def test_invalid_values(hass, mqtt_mock):
     assert state.attributes.get("white_value") == 255
     assert state.attributes.get("color_temp") == 100
 
+    # Empty color value
+    async_fire_mqtt_message(
+        hass,
+        "test_light_rgb",
+        '{"state":"ON",' '"color":{}}',
+    )
+
+    # Color should not have changed
+    state = hass.states.get("light.test")
+    assert state.state == STATE_ON
+    assert state.attributes.get("rgb_color") == (255, 255, 255)
+
     # Bad HS color values
     async_fire_mqtt_message(
-        hass, "test_light_rgb", '{"state":"ON",' '"color":{"h":"bad","s":"val"}}',
+        hass,
+        "test_light_rgb",
+        '{"state":"ON",' '"color":{"h":"bad","s":"val"}}',
     )
 
     # Color should not have changed
@@ -1027,7 +1070,9 @@ async def test_invalid_values(hass, mqtt_mock):
 
     # Bad XY color values
     async_fire_mqtt_message(
-        hass, "test_light_rgb", '{"state":"ON",' '"color":{"x":"bad","y":"val"}}',
+        hass,
+        "test_light_rgb",
+        '{"state":"ON",' '"color":{"x":"bad","y":"val"}}',
     )
 
     # Color should not have changed
@@ -1177,6 +1222,22 @@ async def test_discovery_update_light(hass, mqtt_mock, caplog):
     await help_test_discovery_update(
         hass, mqtt_mock, caplog, light.DOMAIN, data1, data2
     )
+
+
+async def test_discovery_update_unchanged_light(hass, mqtt_mock, caplog):
+    """Test update of discovered light."""
+    data1 = (
+        '{ "name": "Beer",'
+        '  "schema": "json",'
+        '  "state_topic": "test_topic",'
+        '  "command_topic": "test_topic" }'
+    )
+    with patch(
+        "homeassistant.components.mqtt.light.schema_json.MqttLightJson.discovery_update"
+    ) as discovery_update:
+        await help_test_discovery_update_unchanged(
+            hass, mqtt_mock, caplog, light.DOMAIN, data1, discovery_update
+        )
 
 
 @pytest.mark.no_fail_on_log_exception

@@ -1,13 +1,13 @@
 """Constants for GIOS integration."""
 from datetime import timedelta
 
-ATTR_NAME = "name"
 ATTR_STATION = "station"
 CONF_STATION_ID = "station_id"
 DEFAULT_NAME = "GIOŚ"
 # Term of service GIOŚ allow downloading data no more than twice an hour.
 SCAN_INTERVAL = timedelta(minutes=30)
 DOMAIN = "gios"
+MANUFACTURER = "Główny Inspektorat Ochrony Środowiska"
 
 AQI_GOOD = "dobry"
 AQI_MODERATE = "umiarkowany"
