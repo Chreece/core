@@ -145,6 +145,8 @@ class SnapcastClientDevice(CoreSnapcastClientDevice):
             features |= MediaPlayerEntityFeature.NEXT_TRACK
         if properties.get("canGoPrevious", False):
             features |= MediaPlayerEntityFeature.PREVIOUS_TRACK
+        if properties.get("canSeek", False):
+            features |= MediaPlayerEntityFeature.SEEK
 
         features |= MediaPlayerEntityFeature.STOP
         return features
@@ -169,7 +171,9 @@ class SnapcastClientDevice(CoreSnapcastClientDevice):
 
         return super().state
 
-    async def _async_stream_control(self, command: str) -> None:
+    async def _async_stream_control(
+        self, command: str, params: dict[str, Any] | None = None
+    ) -> None:
         """Send a native Stream.Control command to the active Snapserver stream."""
         if self._current_group is None:
             raise HomeAssistantError(
@@ -177,7 +181,9 @@ class SnapcastClientDevice(CoreSnapcastClientDevice):
             )
 
         stream_id = self._current_group.stream
-        result = await self.coordinator.server.stream_control(stream_id, command, {})
+        result = await self.coordinator.server.stream_control(
+            stream_id, command, params or {}
+        )
 
         if isinstance(result, dict) and "code" in result:
             raise HomeAssistantError(
@@ -214,3 +220,10 @@ class SnapcastClientDevice(CoreSnapcastClientDevice):
     async def async_media_previous_track(self) -> None:
         """Skip to the previous track through the active Snapserver stream."""
         await self._async_stream_control("previous")
+
+    @override
+    async def async_media_seek(self, position: float) -> None:
+        """Seek to an absolute position through the active Snapserver stream."""
+        await self._async_stream_control(
+            "setPosition", {"position": float(position)}
+        )
