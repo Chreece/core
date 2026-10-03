@@ -3,11 +3,13 @@
 from unittest.mock import AsyncMock, PropertyMock, patch
 
 import pytest
+from snapcast.control.client import Snapclient
 from syrupy.assertion import SnapshotAssertion
 
 from homeassistant.components.media_player import (
     ATTR_GROUP_MEMBERS,
     ATTR_INPUT_SOURCE,
+    ATTR_MEDIA_VOLUME_LEVEL,
     DOMAIN as MEDIA_PLAYER_DOMAIN,
     SERVICE_JOIN,
     SERVICE_MEDIA_NEXT_TRACK,
@@ -18,6 +20,7 @@ from homeassistant.components.media_player import (
     SERVICE_MEDIA_STOP,
     SERVICE_SELECT_SOURCE,
     SERVICE_UNJOIN,
+    SERVICE_VOLUME_SET,
     MediaPlayerEntityFeature,
     MediaPlayerState,
 )
@@ -59,6 +62,72 @@ async def test_state(
         ],
     ],
 )
+async def test_client_identity_survives_reconnect(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_create_server: AsyncMock,
+    mock_client_1: AsyncMock,
+    mock_client_2: AsyncMock,
+    mock_group_1: AsyncMock,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """Test a reconnect cannot rebind an entity to another physical client."""
+    with patch("secrets.token_hex", return_value="mock_token"):
+        await setup_integration(hass, mock_config_entry)
+        assert mock_config_entry.state is ConfigEntryState.LOADED
+
+    entity_id = "media_player.test_client_1_snapcast_client"
+    registry_entry = entity_registry.async_get(entity_id)
+    assert registry_entry is not None
+    original_unique_id = registry_entry.unique_id
+
+    # A reboot can temporarily remove the physical client from the server status.
+    # The HA entity and registry identity must survive that gap.
+    mock_create_server.clients = [mock_client_2]
+    mock_config_entry.runtime_data.async_update_listeners()
+    await hass.async_block_till_done()
+
+    registry_entry = entity_registry.async_get(entity_id)
+    assert registry_entry is not None
+    assert registry_entry.unique_id == original_unique_id
+
+    # python-snapcast can expose a replacement Snapclient object for the same
+    # physical identifier after reconnecting. Commands must resolve that current
+    # object by the immutable identifier instead of using a stale object.
+    replacement_client = AsyncMock(spec=Snapclient)
+    replacement_client.identifier = mock_client_1.identifier
+    replacement_client.friendly_name = mock_client_1.friendly_name
+    replacement_client.version = mock_client_1.version
+    replacement_client.connected = True
+    replacement_client.name = mock_client_1.name
+    replacement_client.latency = mock_client_1.latency
+    replacement_client.muted = False
+    replacement_client.volume = 77
+    replacement_client.group = mock_group_1
+
+    mock_create_server.clients = [replacement_client, mock_client_2]
+    mock_config_entry.runtime_data.async_update_listeners()
+    await hass.async_block_till_done()
+
+    await hass.services.async_call(
+        MEDIA_PLAYER_DOMAIN,
+        SERVICE_VOLUME_SET,
+        {
+            ATTR_ENTITY_ID: entity_id,
+            ATTR_MEDIA_VOLUME_LEVEL: 0.37,
+        },
+        blocking=True,
+    )
+
+    replacement_client.set_volume.assert_awaited_once_with(37)
+    mock_client_1.set_volume.assert_not_awaited()
+    mock_client_2.set_volume.assert_not_awaited()
+
+    registry_entry = entity_registry.async_get(entity_id)
+    assert registry_entry is not None
+    assert registry_entry.unique_id == original_unique_id
+
+
 async def test_join(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
