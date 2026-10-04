@@ -224,11 +224,17 @@ jobs:
           if [[ "${INPUT_LINT_ONLY}" == "true" ]] \
             || [[ "${INPUT_PYLINT_ONLY}" == "true" ]] \
             || [[ "${INPUT_MYPY_ONLY}" == "true" ]] \
-            || [[ "${INPUT_AUDIT_LICENSES_ONLY}" == "true" ]] \
-            || [[ "${GITHUB_EVENT_NAME}" == "push" \
-              && "${REPO_FULL_NAME}" != "home-assistant/core" ]];
+            || [[ "${INPUT_AUDIT_LICENSES_ONLY}" == "true" ]];
           then
             lint_only="true"
+            skip_coverage="true"
+          fi
+
+          # Codecov tokenless uploads are not enabled for repository forks/copies.
+          # Keep running pytest there, but skip coverage upload jobs that require
+          # the upstream home-assistant/core Codecov configuration.
+          if [[ "${REPO_FULL_NAME}" != "home-assistant/core" ]];
+          then
             skip_coverage="true"
           fi
 
