@@ -12,6 +12,7 @@ from homeassistant.components.snapcast.coordinator import (
     SnapcastConfigEntry,
     SnapcastUpdateCoordinator,
 )
+from homeassistant.components.snapcast.entity import SnapcastCoordinatorEntity
 from homeassistant.components.snapcast.media_player import (
     SnapcastClientDevice as CoreSnapcastClientDevice,
 )
@@ -90,7 +91,134 @@ class SnapcastClientDevice(CoreSnapcastClientDevice):
         device: Snapclient,
     ) -> None:
         """Initialize the Snapcast client."""
+        self._client_id = device.identifier
+        self._fallback_name = device.friendly_name
+        self._bound_device: Snapclient | None = None
         super().__init__(coordinator, device)
+
+    @property
+    def _device(self) -> Snapclient | None:
+        """Return the current Snapclient object for the immutable client ID."""
+        try:
+            return self.coordinator.server.client(self._client_id)
+        except KeyError:
+            return None
+
+    @_device.setter
+    def _device(self, device: Snapclient) -> None:
+        """Capture identity when the core class assigns its client object."""
+        self._client_id = device.identifier
+        self._fallback_name = device.friendly_name
+
+    def _require_device(self) -> Snapclient:
+        """Return the current client or raise while it is unavailable."""
+        if (device := self._device) is None:
+            raise HomeAssistantError(
+                f"Snapcast client {self._client_id!r} is not currently available"
+            )
+        return device
+
+    def _bind_device_callback(self) -> None:
+        """Move the HA callback to a replacement Snapclient after reconnect."""
+        device = self._device
+        if device is self._bound_device:
+            return
+
+        if self._bound_device is not None:
+            self._bound_device.set_callback(None)
+
+        self._bound_device = device
+        if device is not None:
+            device.set_callback(self.schedule_update_ha_state)
+
+    @override
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to the coordinator and current Snapclient object."""
+        await super().async_added_to_hass()
+        self._bind_device_callback()
+
+    @callback
+    @override
+    def _handle_coordinator_update(self) -> None:
+        """Rebind when python-snapcast replaces a client object on reconnect."""
+        self._bind_device_callback()
+        super()._handle_coordinator_update()
+
+    @override
+    async def async_will_remove_from_hass(self) -> None:
+        """Unbind callbacks without dereferencing a disconnected client."""
+        if self._bound_device is not None:
+            self._bound_device.set_callback(None)
+            self._bound_device = None
+        await SnapcastCoordinatorEntity.async_will_remove_from_hass(self)
+
+    @property
+    @override
+    def available(self) -> bool:
+        """Return whether this exact Snapcast client currently exists."""
+        return super().available and self._device is not None
+
+    @property
+    def identifier(self) -> str:
+        """Return the immutable Snapcast client identifier."""
+        return self._client_id
+
+    @property
+    @override
+    def name(self) -> str:
+        """Return the current client name, retaining a fallback while offline."""
+        if (device := self._device) is not None:
+            return f"{device.friendly_name} Snapcast Client"
+        return f"{self._fallback_name} Snapcast Client"
+
+    @property
+    def latency(self) -> float | None:
+        """Return current client latency."""
+        if (device := self._device) is None:
+            return None
+        return device.latency
+
+    @property
+    @override
+    def is_volume_muted(self) -> bool:
+        """Return current mute state."""
+        if (device := self._device) is None:
+            return False
+        return device.muted
+
+    @override
+    async def async_mute_volume(self, mute: bool) -> None:
+        """Mute exactly this immutable Snapcast client."""
+        await self._require_device().set_muted(mute)
+        self.async_write_ha_state()
+
+    @property
+    @override
+    def volume_level(self) -> float | None:
+        """Return current client volume."""
+        if (device := self._device) is None:
+            return None
+        return device.volume / 100
+
+    @override
+    async def async_set_volume_level(self, volume: float) -> None:
+        """Set volume on exactly this immutable Snapcast client."""
+        await self._require_device().set_volume(round(volume * 100))
+        self.async_write_ha_state()
+
+    async def async_snapshot(self) -> None:
+        """Snapshot this exact client's state."""
+        self._require_device().snapshot()
+
+    async def async_restore(self) -> None:
+        """Restore this exact client's state."""
+        await self._require_device().restore()
+        self.async_write_ha_state()
+
+    async def async_set_latency(self, latency) -> None:
+        """Set latency on exactly this immutable Snapcast client."""
+        await self._require_device().set_latency(latency)
+        self.async_write_ha_state()
 
     @property
     def _current_group(self) -> Snapgroup | None:
