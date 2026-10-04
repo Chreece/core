@@ -106,9 +106,7 @@ class SnapcastClientDevice(SnapcastCoordinatorEntity, MediaPlayerEntity):
         self._client_id = device.identifier
         self._fallback_name = device.friendly_name
         self._bound_device: Snapclient | None = None
-        self._attr_unique_id = self.get_unique_id(
-            coordinator.host_id, self._client_id
-        )
+        self._attr_unique_id = self.get_unique_id(coordinator.host_id, self._client_id)
 
     @classmethod
     def get_unique_id(cls, host, id) -> str:
