@@ -8,7 +8,6 @@ from homeassistant.components.media_player import (
     MediaPlayerEntityFeature,
     MediaPlayerState,
 )
-from homeassistant.components.snapcast.const import DOMAIN
 from homeassistant.components.snapcast.coordinator import (
     SnapcastConfigEntry,
     SnapcastUpdateCoordinator,
