@@ -4,11 +4,11 @@ import socket
 from typing import override
 
 import probatio
-import snapcast.control
-from snapcast.control.server import CONTROL_PORT
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT
+import snapcast.control
+from snapcast.control.server import CONTROL_PORT
 
 DOMAIN = "snapcast"
 DEFAULT_TITLE = "Snapcast"
