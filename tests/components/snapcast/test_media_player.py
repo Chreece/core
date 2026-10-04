@@ -45,16 +45,6 @@ async def test_state(
     await snapshot_platform(hass, entity_registry, snapshot, mock_config_entry.entry_id)
 
 
-@pytest.mark.parametrize(
-    ("members"),
-    [
-        ["media_player.test_client_2_snapcast_client"],
-        [
-            "media_player.test_client_1_snapcast_client",
-            "media_player.test_client_2_snapcast_client",
-        ],
-    ],
-)
 async def test_client_identity_survives_reconnect(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
@@ -116,6 +106,16 @@ async def test_client_identity_survives_reconnect(
     assert registry_entry.unique_id == original_unique_id
 
 
+@pytest.mark.parametrize(
+    ("members"),
+    [
+        ["media_player.test_client_2_snapcast_client"],
+        [
+            "media_player.test_client_1_snapcast_client",
+            "media_player.test_client_2_snapcast_client",
+        ],
+    ],
+)
 async def test_join(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
