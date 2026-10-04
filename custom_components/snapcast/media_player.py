@@ -4,16 +4,11 @@ from collections.abc import Mapping
 import logging
 from typing import Any, override
 
-from snapcast.control.client import Snapclient
-from snapcast.control.group import Snapgroup
-from snapcast.control.stream import Snapstream
-
 from homeassistant.components.media_player import (
-    DOMAIN as MEDIA_PLAYER_DOMAIN,
     MediaPlayerEntityFeature,
     MediaPlayerState,
 )
-from homeassistant.components.snapcast.const import CLIENT_PREFIX, DOMAIN
+from homeassistant.components.snapcast.const import DOMAIN
 from homeassistant.components.snapcast.coordinator import (
     SnapcastConfigEntry,
     SnapcastUpdateCoordinator,
@@ -23,8 +18,10 @@ from homeassistant.components.snapcast.media_player import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from snapcast.control.client import Snapclient
+from snapcast.control.group import Snapgroup
+from snapcast.control.stream import Snapstream
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -55,20 +52,22 @@ async def async_setup_entry(
     def _update_clients() -> None:
         snapcast_ids = {device.identifier for device in coordinator.server.clients}
 
+        # Keep the HA entity stable while a Snapclient temporarily disappears during
+        # a reboot. The inherited entity resolves the current Snapclient object from
+        # this immutable identifier when it reconnects.
         ids_to_add = snapcast_ids - known_client_ids
-        ids_to_remove = known_client_ids - snapcast_ids
-
-        known_client_ids.difference_update(ids_to_remove)
         known_client_ids.update(ids_to_add)
 
-        if not (ids_to_add | ids_to_remove):
+        if not ids_to_add:
             return
 
         _LOGGER.debug(
             "New snapcast client: %s",
-            [coordinator.server.client(client_id).friendly_name for client_id in ids_to_add],
+            [
+                coordinator.server.client(client_id).friendly_name
+                for client_id in ids_to_add
+            ],
         )
-        _LOGGER.debug("Remove snapcast client IDs: %s", list(ids_to_remove))
 
         async_add_entities(
             [
@@ -79,23 +78,12 @@ async def async_setup_entry(
             ]
         )
 
-        entity_registry = er.async_get(hass)
-        for snapcast_id in ids_to_remove:
-            if entity_id := entity_registry.async_get_entity_id(
-                MEDIA_PLAYER_DOMAIN,
-                DOMAIN,
-                SnapcastClientDevice.get_unique_id(coordinator.host_id, snapcast_id),
-            ):
-                entity_registry.async_remove(entity_id)
-
     _update_clients()
     coordinator.async_add_listener(_update_clients)
 
 
 class SnapcastClientDevice(CoreSnapcastClientDevice):
     """Snapcast client whose transport commands control its active server stream."""
-
-    _device: Snapclient
 
     def __init__(
         self,
@@ -108,7 +96,9 @@ class SnapcastClientDevice(CoreSnapcastClientDevice):
     @property
     def _current_group(self) -> Snapgroup | None:
         """Return the group the client is associated with."""
-        return self._device.group
+        if (device := self._device) is None:
+            return None
+        return device.group
 
     @property
     def _current_stream(self) -> Snapstream | None:
@@ -155,7 +145,7 @@ class SnapcastClientDevice(CoreSnapcastClientDevice):
     @override
     def state(self) -> MediaPlayerState | None:
         """Return stream playback state when the control plugin provides it."""
-        if not self._device.connected:
+        if (device := self._device) is None or not device.connected:
             return MediaPlayerState.OFF
 
         if (
